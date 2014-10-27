@@ -20,10 +20,9 @@
     (syntax-parse stx
       [(match_ val-expr:expr
                [pat:expr body ...+] ...)
-       (syntax-property
-        #'(match val-expr
-            [(:pat pat) body ...] ...)
-        disappeared-use (list (syntax-local-introduce #'match_)))])))
+       (syntax/loc stx
+         (match val-expr
+           [(:pat pat) body ...] ...))])))
 
 (define-match-expander :pat
   (lambda (stx)
@@ -41,10 +40,10 @@
        (with-syntax ([qp (rewrite-qp #'qp)])
          (syntax/loc stx (qq qp)))]
       [(id:id pat ...)
-       (with-syntax ([(p ...) (map rewrite (syntax->list #'(pat ...)))])
+       (with-syntax ([(p ...) (stx-map rewrite #'(pat ...))])
          (syntax/loc stx (id p ...)))]
       [(pat ...)
-       (with-syntax ([(p ...) (map rewrite (syntax->list #'(pat ...)))])
+       (with-syntax ([(p ...) (stx-map rewrite #'(pat ...))])
          (syntax/loc stx (p ...)))]
       [#(pat ...) stx]
       [#&pat stx]
@@ -83,8 +82,8 @@
                                  (+ stx.column pat-str.length 1)
                                  (+ stx.position pat-str.length 1)
                                  type-str.length))))
-         (with-syntax ([pat pat-id]
-                       [type type-id])
+         (with-syntax ([pat (with-disappeared-use-prop pat-id type-id)]
+                       [type (orig type-id)])
            (syntax/loc stx
              (type pat))))]))
   
@@ -103,6 +102,9 @@
   
   (define (orig stx)
     (syntax-property stx 'original-for-check-syntax #t))
+  
+  (define (with-disappeared-use-prop stx . lst)
+    (syntax-property stx disappeared-use lst))
     
   
   (define (rewrite-qp stx)
