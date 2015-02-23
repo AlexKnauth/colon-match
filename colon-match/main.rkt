@@ -11,9 +11,16 @@
                      syntax/parse
                      racket/syntax
                      syntax/stx
+                     syntax/srcloc
                      racket/match
                      racket/string
+                     rackjure/threading
                      ))
+(module+ test
+  (require rackunit
+           (only-in racket/contract/base and/c)
+           (for-syntax rackunit
+                       )))
 
 (define-syntax :match
   (lambda (stx)
@@ -52,40 +59,26 @@
       [_ stx]))
   
   (define (rewrite-id stx)
-    (define sym (syntax-e stx))
-    (define str (symbol->string sym))
-    (match (split str)
+    (match (~> stx syntax-e symbol->string split)
       [#f stx]
       [(list pat-str type-str)
-       (let ([pat-sym (string->symbol pat-str)]
-             [type-sym (string->symbol type-str)]
-             [stx.source (syntax-source stx)]
-             [stx.line (syntax-line stx)]
-             [stx.column (syntax-column stx)]
-             [stx.position (syntax-position stx)]
-             [stx.span (syntax-span stx)])
-         (define pat-str.length (string-length pat-str))
-         (define type-str.length (string-length type-str))
-         (define pat-id
-           (datum->syntax stx pat-sym
-                          (list stx.source
-                                stx.line
-                                stx.column
-                                stx.position
-                                pat-str.length)
-                          (orig stx)))
-         (define type-id
-           (orig
-            (datum->syntax stx type-sym
-                           (list stx.source
-                                 stx.line
-                                 (+ stx.column pat-str.length 1)
-                                 (+ stx.position pat-str.length 1)
-                                 type-str.length))))
-         (with-syntax ([pat (with-disappeared-use-prop pat-id type-id)]
-                       [type (orig type-id)])
-           (syntax/loc stx
-             (type pat))))]))
+       (define pat-str.length (string-length pat-str))
+       (define type-str.length (string-length type-str))
+       (define pat-id
+         (datum->syntax stx (string->symbol pat-str)
+                        (update-source-location stx #:span pat-str.length)
+                        (orig stx)))
+       (define type-id
+         (orig
+          (datum->syntax stx (string->symbol type-str)
+                         (update-source-location stx
+                           #:column   (+ (syntax-column stx)   pat-str.length 1)
+                           #:position (+ (syntax-position stx) pat-str.length 1)
+                           #:span     type-str.length))))
+       (with-syntax ([pat (with-disappeared-use-prop pat-id type-id)]
+                     [type (orig type-id)])
+         (syntax/loc stx
+           (type pat)))]))
   
   (define (split str)
     (match (string-split str ":" #:trim? #f)
@@ -110,13 +103,10 @@
   (define (rewrite-qp stx)
     (syntax-parse stx #:literals (unquote unquote-splicing)
       [sym:id stx]
-      [((~and uq unquote) pat) 
+      [((~and uq (~or unquote unquote-splicing)) pat) 
        (with-syntax ([p (rewrite #'pat)])
          (syntax/loc stx (uq p)))]
-      [((~and uqs unquote-splicing) pat)
-       (with-syntax ([p (rewrite #'pat)])
-         (syntax/loc stx (uqs p)))]
-      [(qp ...) (rewrite-qp-list stx)]
+      [(qp ...+ . qp2) (rewrite-qp-pair stx)]
       [#(qp ...) (rewrite-qp-vector stx)]
       [#&qp (rewrite-qp-box stx)]
       [qp #:when (prefab-struct-key (syntax-e #'qp))
@@ -124,16 +114,17 @@
       [_ stx]
       ))
   
-  (define (rewrite-qp-list stx)
+  (define (rewrite-qp-pair stx)
     (syntax-parse stx
-      [(qp ...)
-       (with-syntax ([(qp ...) (stx-map rewrite-qp #'(qp ...))])
-         (syntax/loc stx (qp ...)))]))
+      [(qp ... . rst)
+       (with-syntax ([(qp ...) (stx-map rewrite-qp #'(qp ...))]
+                     [rst (rewrite-qp #'rst)])
+         (syntax/loc stx (qp ... . rst)))]))
   
   (define (rewrite-qp-vector stx)
     (syntax-parse stx
       [#(qp ...)
-       (with-syntax ([(qp ...) (rewrite-qp-list #'(qp ...))])
+       (with-syntax ([(qp ...) (rewrite-qp-pair #'(qp ...))])
          (syntax/loc stx #(qp ...)))]))
   
   (define (rewrite-qp-box stx)
@@ -149,7 +140,7 @@
          (define dat
            (apply make-prefab-struct key-datum
                   (map rewrite-qp subqps)))
-         (datum->syntax stx dat)])))
+         (datum->syntax stx dat stx)])))
   
   )
 
@@ -198,9 +189,6 @@
 
 
 (module+ test
-  (require rackunit
-           (only-in racket/contract/base and/c))
-  
   (check-equal? (:match 1 [n:num n]) 1)
   (check-equal? (:match 'x [n:num n] [_ 2]) 2)
   
@@ -223,36 +211,36 @@
   (check-equal? (:match '(42 x) [(list n:num s:sym) (list n s)]) '(42 x))
   
   (check-equal? (:match (list 1 "2" '|3|)
-                        [(list a:1:num b:2:str c:3:sym)
-                         (list a:1 (string->number b:2) (string->number (symbol->string c:3)))])
+                  [(list a:1:num b:2:str c:3:sym)
+                   (list a:1 (string->number b:2) (string->number (symbol->string c:3)))])
                 (list 1 2 3))
   
   (check-equal? (:match '(1 2 #(1 2 3 (1 2 3 4)))
-                        [(list a:num b:num (vector c:num d:num e:num (list f:num g:num h:num i:num)))
-                         (list a b c d e f g h i)])
+                  [(list a:num b:num (vector c:num d:num e:num (list f:num g:num h:num i:num)))
+                   (list a b c d e f g h i)])
                 (list 1 2 1 2 3 1 2 3 4))
   
   (check-equal? (:match '(1 2 #(1 2 3 (1 2 3 #&4)))
-                        [`(,a:num ,b:num #(,c:num ,d:num ,e:num (,f:num ,g:num ,h:num #&,i:num)))
-                         (list a b c d e f g h i)])
+                  [`(,a:num ,b:num #(,c:num ,d:num ,e:num (,f:num ,g:num ,h:num #&,i:num)))
+                   (list a b c d e f g h i)])
                 (list 1 2 1 2 3 1 2 3 4))
   
   (check-equal? (:match #s(key-datum 1 2 3)
-                        [`#s(key-datum ,a:num ,b:num ,c:num) (list a b c)])
+                  [`#s(key-datum ,a:num ,b:num ,c:num) (list a b c)])
                 (list 1 2 3))
   
   (check-equal? (:match #s(key-datum_0 1 2 3)
-                        [`#s(key-datum_0 ,a:num ,b:num ,c:num) (list a b c)])
+                  [`#s(key-datum_0 ,a:num ,b:num ,c:num) (list a b c)])
                 (list 1 2 3))
   
   (check-equal? (:match #hash((1 . "1") (2 . "2") (3 . "3"))
-                        [(hash-table [1 a:str] [2 b:str] [3 c:str])
-                         (list a b c)])
+                  [(hash-table [1 a:str] [2 b:str] [3 c:str])
+                   (list a b c)])
                 (list "1" "2" "3"))
   
   (check-equal? (:match #(struct:num 1 2 3)
-                        ['#(struct:num 1 2 3)
-                         "yay!"])
+                  ['#(struct:num 1 2 3)
+                   "yay!"])
                 "yay!")
   
   (define-:match-class +num (and/c number? positive?))
@@ -264,7 +252,6 @@
                 #f)
   
   (begin-for-syntax
-    (require rackunit)
     (check-equal? (split "x") #f)
     (check-equal? (split "x:y") '("x" "y"))
     (check-equal? (split "x:y:z") '("x:y" "z"))
