@@ -185,7 +185,7 @@
   [proc procedure?]
   [hsh hash?]
   [char char?]
-  [box box?]
+  [bx box?]
   [bool boolean?]
   [truth true?]
   [true true?]
