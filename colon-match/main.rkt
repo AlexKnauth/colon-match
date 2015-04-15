@@ -9,12 +9,10 @@
          (prefix-in rkt: racket/bool)
          (for-syntax racket/base
                      syntax/parse
-                     racket/syntax
                      syntax/stx
                      syntax/srcloc
                      racket/match
                      racket/string
-                     rackjure/threading
                      ))
 (module+ test
   (require rackunit
@@ -57,9 +55,12 @@
       [pat #:when (prefab-struct-key (syntax-e #'pat))
            stx]
       [_ stx]))
+
+  (define (split-id id)
+    (split (symbol->string (syntax-e id))))
   
   (define (rewrite-id stx)
-    (match (~> stx syntax-e symbol->string split)
+    (match (split-id stx)
       [#f stx]
       [(list pat-str type-str)
        (define pat-str.length (string-length pat-str))
