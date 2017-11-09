@@ -5,7 +5,7 @@ match with colon notation, based on discussion with @soegaard at http://lists.ra
 
 documentation: http://pkg-build.racket-lang.org/doc/colon-match/index.html
 
-The [`:match`](http://docs.racket-lang.org/colon-match/index.html#%28form._%28%28lib._colon-match%2Fmain..rkt%29._~3amatch%29%29) form is like [`match`](http://docs.racket-lang.org/reference/match.html#%28form._%28%28lib._racket%2Fmatch..rkt%29._match%29%29), except that it allowes identifiers with colons in patterns to specify different types of values. The pattern `x:num` matches a number and bind it at `x`, the pattern `v:str` matches a string and binds it to `v`, and so on.
+The [`:match`](http://docs.racket-lang.org/colon-match/index.html#%28form._%28%28lib._colon-match%2Fmain..rkt%29._~3amatch%29%29) form is like [`match`](http://docs.racket-lang.org/reference/match.html#%28form._%28%28lib._racket%2Fmatch..rkt%29._match%29%29), except that it allowes identifiers with colons in patterns to specify different types of values. The pattern `x:num` matches a number and bind it as `x`, the pattern `v:str` matches a string and binds it as `v`, and so on.
 
 Examples:
 
